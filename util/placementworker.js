@@ -12,6 +12,24 @@ function toClipperCoordinates(polygon){
 	return clone;
 };
 
+function get_polygon_centroid(pts) {
+	var first = pts[0], last = pts[pts.length-1];
+	if (first.x != last.x || first.y != last.y) pts.push(first);
+	var twicearea=0,
+	x=0, y=0,
+	nPts = pts.length,
+	p1, p2, f;
+	for ( var i=0, j=nPts-1 ; i<nPts ; j=i++ ) {
+	   p1 = pts[i]; p2 = pts[j];
+	   f = p1.x*p2.y - p2.x*p1.y;
+	   twicearea += f;          
+	   x += ( p1.x + p2.x ) * f;
+	   y += ( p1.y + p2.y ) * f;
+	}
+	f = twicearea * 3;
+	return { x:x/f, y:y/f };
+ }
+
 function toNestCoordinates(polygon, scale){
 	var clone = [];
 	for(var i=0; i<polygon.length; i++){
@@ -53,6 +71,7 @@ function PlacementWorker(binPolygon, paths, ids, rotations, config, nfpCache){
 	this.rotations = rotations;
 	this.config = config;
 	this.nfpCache = nfpCache || {};
+	this.count = 0
 	
 	// return a placement for the paths/rotations given
 	// happens inside a webworker
@@ -62,7 +81,7 @@ function PlacementWorker(binPolygon, paths, ids, rotations, config, nfpCache){
 
 		if(!self.binPolygon){
 			return null;
-		}		
+		}
 		
 		var i, j, k, m, n, path;
 		
@@ -81,8 +100,13 @@ function PlacementWorker(binPolygon, paths, ids, rotations, config, nfpCache){
 		var allplacements = [];
 		var fitness = 0;
 		var binarea = Math.abs(GeometryUtil.polygonArea(self.binPolygon));
+
 		var key, nfp;
+		function remap(value, istart, istop, ostart, ostop) {
+			return ostart + (ostop - ostart) * ((value - istart) / (istop - istart));
+		  };
 		
+		let mapFn = Function(self.mapFn)()
 		while(paths.length > 0){
 			
 			var placed = [];
@@ -94,7 +118,22 @@ function PlacementWorker(binPolygon, paths, ids, rotations, config, nfpCache){
 				
 				// inner NFP
 				key = JSON.stringify({A:-1,B:path.id,inside:true,Arotation:0,Brotation:path.rotation});
+
 				var binNfp = self.nfpCache[key];
+				binNfp = binNfp.map( (d) => {
+					let binCentroid = get_polygon_centroid( d )
+					let res = d.map( (_d) => {
+						let dx = (_d.x - binCentroid.x)
+						let dy = (_d.y - binCentroid.y)
+						let dist = Math.sqrt(dx * dx + dy * dy)
+						let scale = mapFn(fitness)
+						return {
+							x: (_d.x - binCentroid.x) * scale + binCentroid.x,
+							y: (_d.y - binCentroid.y) * scale + binCentroid.y
+						}
+					} )
+					return res
+				})
 				
 				// part unplaceable, skip
 				if(!binNfp || binNfp.length == 0){
@@ -122,11 +161,13 @@ function PlacementWorker(binPolygon, paths, ids, rotations, config, nfpCache){
 				if(placed.length == 0){
 					// first placement, put it on the left
 					for(j=0; j<binNfp.length; j++){
+						let binCentroid = get_polygon_centroid( binNfp[j])
 						for(k=0; k<binNfp[j].length; k++){
-							if(position === null || binNfp[j][k].x-path[0].x < position.x ){
+							if(position === null || binCentroid.x-path[0].x < position.x ){
+								// console.log( JSON.stringify(binNfp), binNfp[j][k], JSON.stringify(path) )
 								position = {
-									x: binNfp[j][k].x-path[0].x,
-									y: binNfp[j][k].y-path[0].y,
+									x: binCentroid.x -path[0].x,
+									y: binCentroid.y-path[0].y,
 									id: path.id,
 									rotation: path.rotation
 								}
@@ -134,6 +175,11 @@ function PlacementWorker(binPolygon, paths, ids, rotations, config, nfpCache){
 						}
 					}
 					
+					console.log(self.count ++ )
+					console.log( self.binPolygon)
+					self.binPolygon.forEach((d) => {
+						d.x 
+					})
 					placements.push(position);
 					placed.push(path);
 					

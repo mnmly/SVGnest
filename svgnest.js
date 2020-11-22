@@ -270,6 +270,8 @@
 				adam.sort(function(a, b){
 					return Math.abs(GeometryUtil.polygonArea(b)) - Math.abs(GeometryUtil.polygonArea(a));
 				});
+
+				console.log('worker launchd')
 				
 				GA = new GeneticAlgorithm(adam, binPolygon, config);
 			}
@@ -328,6 +330,14 @@
 			nfpCache = newCache;
 			
 			var worker = new PlacementWorker(binPolygon, placelist.slice(0), ids, rotations, config, nfpCache);
+			worker.mapFn = `
+			return function mapFn (fitness){
+				function remap(value, istart, istop, ostart, ostop) {
+					return ostart + (ostop - ostart) * ((value - istart) / (istop - istart));
+			  	};	
+				return remap(fitness, 1, 10, 1.0, 0.2)
+			}
+			`
 			
 			var p = new Parallel(nfpPairs, {
 				env: {
@@ -576,7 +586,7 @@
 								numPlacedParts++;
 							}
 						}
-						displayCallback(self.applyPlacement(best.placements), placedArea/totalArea, numPlacedParts, numParts);
+						displayCallback(self.applyPlacement(best.placements, Function(worker.mapFn)()), placedArea/totalArea, numPlacedParts, numParts);
 					}
 					else{
 						displayCallback();
@@ -744,7 +754,7 @@
 		}
 		
 		// returns an array of SVG elements that represent the placement, for export or rendering
-		this.applyPlacement = function(placement){
+		this.applyPlacement = function(placement, mapFn){
 			var i, j, k;
 			var clone = [];
 			for(i=0; i<parts.length; i++){
@@ -761,7 +771,10 @@
 				var binclone = bin.cloneNode(false);
 				
 				binclone.setAttribute('class','bin');
-				binclone.setAttribute('transform','translate('+(-binBounds.x)+' '+(-binBounds.y)+')');
+				let scale = mapFn(i)
+				let dx = 0.5 * (-binBounds.width * scale + binBounds.width) / scale
+				let dy = 0.5 * (-binBounds.height * scale + binBounds.height) / scale
+				binclone.setAttribute('transform','scale(' + mapFn(i) + ') translate('+(-binBounds.x)+' '+(-binBounds.y)+')' + ` translate(${dx} ${dy})`);
 				newsvg.appendChild(binclone);
 
 				for(j=0; j<placement[i].length; j++){
